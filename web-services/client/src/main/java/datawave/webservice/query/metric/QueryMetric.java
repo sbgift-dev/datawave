@@ -5,7 +5,6 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.HashSet;
 
 import javax.xml.bind.annotation.XmlAccessType;
@@ -13,10 +12,10 @@ import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlRootElement;
 import javax.xml.bind.annotation.XmlTransient;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import datawave.webservice.query.QueryImpl.Parameter;
 import datawave.webservice.query.result.event.HasMarkings;
 
-import datawave.webservice.query.result.event.MapSchema;
 import org.apache.commons.lang.builder.EqualsBuilder;
 import org.apache.commons.lang.builder.HashCodeBuilder;
 import org.apache.commons.lang.time.DateUtils;
@@ -148,7 +147,8 @@ public class QueryMetric extends BaseQueryMetric implements Serializable, Messag
                             .append(this.getNextCount(), other.getNextCount()).append(this.getSeekCount(), other.getSeekCount())
                             .append(this.getYieldCount(), other.getYieldCount()).append(this.getDocRanges(), other.getDocRanges())
                             .append(this.getFiRanges(), other.getFiRanges()).append(this.getPlan(), other.getPlan())
-                            .append(this.getLoginTime(), other.getLoginTime()).append(this.getPredictions(), other.getPredictions()).isEquals();
+                            .append(this.getLoginTime(), other.getLoginTime()).append(this.getPredictions(), other.getPredictions())
+                            .append(this.getMarkings(), other.getMarkings()).isEquals();
         } else {
             return false;
         }
@@ -370,10 +370,6 @@ public class QueryMetric extends BaseQueryMetric implements Serializable, Messag
                     }
                 }
             }
-            
-            if (message.markings != null) {
-                output.writeObject(37, message.markings, MapSchema.SCHEMA, false);
-            }
         }
         
         public void mergeFrom(Input input, QueryMetric message) throws IOException {
@@ -506,10 +502,6 @@ public class QueryMetric extends BaseQueryMetric implements Serializable, Messag
                         }
                         message.predictions.add(input.mergeObject(null, Prediction.getSchema()));
                         break;
-                    case 37:
-                        message.markings = new HashMap<>();
-                        input.mergeObject(message.markings, MapSchema.SCHEMA);
-                        break;
                     default:
                         input.handleUnknownField(number, this);
                         break;
@@ -592,8 +584,6 @@ public class QueryMetric extends BaseQueryMetric implements Serializable, Messag
                     return "loginTime";
                 case 36:
                     return "predictions";
-                case 37:
-                    return "markings";
                 default:
                     return null;
             }
@@ -643,10 +633,10 @@ public class QueryMetric extends BaseQueryMetric implements Serializable, Messag
             fieldMap.put("plan", 34);
             fieldMap.put("loginTime", 35);
             fieldMap.put("predictions", 36);
-            fieldMap.put("markings", 37);
         }
     };
     
+    @JsonIgnore
     public Schema<? extends BaseQueryMetric> getSchemaInstance() {
         return getSchema();
     }

@@ -1,22 +1,32 @@
 package datawave.webservice.query.metric;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.module.jaxb.JaxbAnnotationModule;
 import datawave.marking.MarkingFunctions;
 import datawave.webservice.query.exception.BadRequestQueryException;
 import datawave.webservice.query.exception.DatawaveErrorCode;
 import datawave.webservice.query.metric.BaseQueryMetric.Lifecycle;
 import datawave.webservice.query.metric.BaseQueryMetric.PageMetric;
 
+import io.protostuff.LinkedBuffer;
+import io.protostuff.ProtostuffIOUtil;
+import io.protostuff.Schema;
 import org.junit.BeforeClass;
 import org.junit.Test;
+
+import javax.xml.bind.JAXBContext;
+import javax.xml.bind.Marshaller;
+import javax.xml.bind.Unmarshaller;
 
 public class QueryMetricTest {
     
@@ -32,6 +42,7 @@ public class QueryMetricTest {
         queryMetric = new QueryMetric();
         markings = new HashMap<String,String>();
         markings.put(MarkingFunctions.Default.COLUMN_VISIBILITY, "PUBLIC");
+        queryMetric.setMarkings(markings);
         negativeSelectors = new ArrayList<String>();
         negativeSelectors.add("negativeSelector1");
         positiveSelectors = new ArrayList<String>();
@@ -117,5 +128,35 @@ public class QueryMetricTest {
         assertEquals(0, queryMetric.getSetupTime());
         assertEquals("user", queryMetric.getUser());
         assertEquals("userDN", queryMetric.getUserDN());
+    }
+    
+    @Test
+    public void testJsonSerialization() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new JaxbAnnotationModule());
+        String metricAsBytes = objectMapper.writeValueAsString(queryMetric);
+        QueryMetric deserializedMetric = objectMapper.readValue(metricAsBytes, QueryMetric.class);
+        assertEquals(queryMetric, deserializedMetric);
+    }
+    
+    @Test
+    public void testXmlSerialization() throws Exception {
+        JAXBContext jaxbContext = JAXBContext.newInstance(QueryMetric.class);
+        Marshaller marshaller = jaxbContext.createMarshaller();
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        marshaller.marshal(queryMetric, baos);
+        Unmarshaller unmarshaller = jaxbContext.createUnmarshaller();
+        QueryMetric deserializedMetric = (QueryMetric) unmarshaller.unmarshal(new ByteArrayInputStream(baos.toByteArray()));
+        assertEquals(queryMetric, deserializedMetric);
+    }
+    
+    @Test
+    public void testProtobufSerialization() throws Exception {
+        Schema<QueryMetric> schema = (Schema<QueryMetric>) queryMetric.getSchemaInstance();
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ProtostuffIOUtil.writeTo(baos, queryMetric, schema, LinkedBuffer.allocate());
+        QueryMetric deserializedMetric = schema.newMessage();
+        ProtostuffIOUtil.mergeFrom(baos.toByteArray(), deserializedMetric, schema);
+        assertEquals(queryMetric, deserializedMetric);
     }
 }
