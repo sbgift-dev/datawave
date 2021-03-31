@@ -1,15 +1,22 @@
 package datawave.webservice.query.metric;
 
-import java.text.DecimalFormat;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.Date;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
+import datawave.configuration.DatawaveEmbeddedProjectStageHolder;
+import datawave.configuration.RefreshEvent;
+import datawave.configuration.spring.SpringBean;
+import datawave.metrics.remote.RemoteQueryMetricService;
+import datawave.security.authorization.DatawavePrincipal;
+import datawave.util.timely.UdpClient;
+import datawave.webservice.common.connection.AccumuloConnectionFactory;
+import datawave.webservice.query.exception.QueryExceptionType;
+import datawave.webservice.query.metric.BaseQueryMetric.Lifecycle;
+import datawave.webservice.query.metric.BaseQueryMetric.PageMetric;
+import datawave.webservice.result.VoidResponse;
+import org.apache.commons.collections4.map.LRUMap;
+import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang.builder.CompareToBuilder;
+import org.apache.deltaspike.core.api.config.ConfigProperty;
+import org.apache.deltaspike.core.api.exclude.Exclude;
+import org.apache.log4j.Logger;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
@@ -30,20 +37,17 @@ import javax.jms.JMSContext;
 import javax.jms.Message;
 import javax.jms.ObjectMessage;
 import javax.jms.Queue;
-
-import datawave.configuration.DatawaveEmbeddedProjectStageHolder;
-import datawave.configuration.RefreshEvent;
-import datawave.configuration.spring.SpringBean;
-import datawave.security.authorization.DatawavePrincipal;
-import datawave.util.timely.UdpClient;
-import datawave.webservice.common.connection.AccumuloConnectionFactory;
-import datawave.webservice.query.metric.BaseQueryMetric.PageMetric;
-import org.apache.commons.collections4.map.LRUMap;
-import org.apache.commons.lang.StringUtils;
-import org.apache.commons.lang.builder.CompareToBuilder;
-import org.apache.deltaspike.core.api.exclude.Exclude;
-import org.apache.log4j.Logger;
-import datawave.webservice.query.metric.BaseQueryMetric.Lifecycle;
+import java.text.DecimalFormat;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Date;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 @RunAs("InternalUser")
 @RolesAllowed({"AuthorizedUser", "AuthorizedQueryServer", "InternalUser", "Administrator"})
@@ -72,6 +76,13 @@ public class QueryMetricsWriter {
     @Inject
     @SpringBean(name = "QueryMetricsWriterConfiguration", refreshable = true)
     private QueryMetricsWriterConfiguration config;
+    
+    @Inject
+    private RemoteQueryMetricService remoteQueryMetricService;
+    
+    @Inject
+    @ConfigProperty(name = "dw.remoteQueryMetricService.enabled", defaultValue = "false")
+    private boolean useRemoteService;
     
     private UdpClient timelyClient = null;
     private Map<String,Long> lastPageMetricMap;
@@ -276,6 +287,28 @@ public class QueryMetricsWriter {
     }
     
     private List<QueryMetricHolder> writeMetrics(QueryMetricHandler queryMetricHandler, List<QueryMetricHolder> metricQueue) throws Exception {
+        if (useRemoteService) {
+            return writeMetricsToRemoteService(metricQueue);
+        } else {
+            return writeMetricsToAccumulo(queryMetricHandler, metricQueue);
+        }
+    }
+    
+    private List<QueryMetricHolder> writeMetricsToRemoteService(List<QueryMetricHolder> metricQueue) throws Exception {
+        List<BaseQueryMetric> updatedMetrics = metricQueue.stream().map(h -> h.getQueryMetric()).collect(Collectors.toList());
+        VoidResponse response = remoteQueryMetricService.updateMetrics(updatedMetrics);
+        List<QueryExceptionType> exceptions = response.getExceptions();
+        if (exceptions == null || exceptions.isEmpty()) {
+            for (BaseQueryMetric m : updatedMetrics) {
+                sendMetricsToTimely(m);
+            }
+            return Collections.emptyList();
+        } else {
+            return metricQueue;
+        }
+    }
+    
+    private List<QueryMetricHolder> writeMetricsToAccumulo(QueryMetricHandler queryMetricHandler, List<QueryMetricHolder> metricQueue) throws Exception {
         
         List<QueryMetricHolder> failedMetrics = new ArrayList<>();
         
