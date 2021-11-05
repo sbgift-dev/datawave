@@ -103,7 +103,9 @@ public class ProtobufEdgeDataTypeHandler<KEYIN,KEYOUT,VALUEOUT> implements Exten
     
     public static final String EDGE_SETUP_FAILURE_POLICY = "protobufedge.setup.default.failurepolicy";
     public static final String EDGE_PROCESS_FAILURE_POLICY = "protobufedge.process.default.failurepolicy";
-    
+
+    //TODO: var here for accessing the conf
+    public static final String EDGE_STATS_ENABLE = "protobufedge.stat.create";
     public static final String EDGE_STATS_LOG_USE_BLOOM = "protobufedge.stats.use.bloom";
     
     public static final String ACTIVITY_DATE_FUTURE_DELTA = "protobufedge.valid.activitytime.future.delta";
@@ -137,6 +139,8 @@ public class ProtobufEdgeDataTypeHandler<KEYIN,KEYOUT,VALUEOUT> implements Exten
     protected Map<String,EdgeDefinitionConfigurationHelper> edges = null;
     
     protected TaskAttemptContext taskAttemptContext = null;
+    //TODO: initialize protected boolean for checking whether creating stats edges
+    protected boolean statsEdgeEnable = false;
     protected boolean useStatsLogBloomFilter = false;
     protected FailurePolicy setUpFailurePolicy = FailurePolicy.FAIL_JOB;
     protected FailurePolicy processFailurePolicy = FailurePolicy.FAIL_JOB;
@@ -170,6 +174,8 @@ public class ProtobufEdgeDataTypeHandler<KEYIN,KEYOUT,VALUEOUT> implements Exten
         
         // Grab the edge table name
         this.edgeTableName = ConfigurationHelper.isNull(conf, EDGE_TABLE_NAME, String.class);
+        //TODO: set local boolean from conf
+        this.statsEdgeEnable = conf.getBoolean(EDGE_STATS_ENABLE, false);
         this.useStatsLogBloomFilter = conf.getBoolean(EDGE_STATS_LOG_USE_BLOOM, false);
         this.metadataTableName = ConfigurationHelper.isNull(conf, METADATA_TABLE_NAME, String.class);
         
@@ -948,20 +954,21 @@ public class ProtobufEdgeDataTypeHandler<KEYIN,KEYOUT,VALUEOUT> implements Exten
                         value.getSink().getValue(ValueType.INDEXED), this.getVisibility(value), date_type);
         writeKey(edgeKey, value.getEdgeValue(true, date_type), context, contextWriter);
         counter++;
-        
+
         // source STATS/ACTIVITY row
-        Key sourceActivityKey = createStatsKey(STATS_TYPE.ACTIVITY, value, value.getSource(), value.getSource().getValue(ValueType.INDEXED),
-                        this.getVisibility(value), date_type);
-        counter += writeKey(sourceActivityKey, value.getStatsActivityValue(true, date_type), context, contextWriter);
-        
-        // source STATS/DURATION row
-        
-        if (value.hasDuration()) {
-            Key sourceDurationKey = createStatsKey(STATS_TYPE.DURATION, value, value.getSource(), value.getSource().getValue(ValueType.INDEXED),
-                            this.getDurationVisibility(value), date_type);
-            counter += writeKey(sourceDurationKey, value.getDurationAsValue(true), context, contextWriter);
+        if (statsEdgeEnable) {
+            Key sourceActivityKey = createStatsKey(STATS_TYPE.ACTIVITY, value, value.getSource(), value.getSource().getValue(ValueType.INDEXED),
+                    this.getVisibility(value), date_type);
+            counter += writeKey(sourceActivityKey, value.getStatsActivityValue(true, date_type), context, contextWriter);
+
+            // source STATS/DURATION row
+            
+            if (value.hasDuration()) {
+                Key sourceDurationKey = createStatsKey(STATS_TYPE.DURATION, value, value.getSource(), value.getSource().getValue(ValueType.INDEXED),
+                        this.getDurationVisibility(value), date_type);
+                counter += writeKey(sourceDurationKey, value.getDurationAsValue(true), context, contextWriter);
+            }
         }
-        
         /*
          * Regular Bidirectional Edge
          */
@@ -971,17 +978,19 @@ public class ProtobufEdgeDataTypeHandler<KEYIN,KEYOUT,VALUEOUT> implements Exten
                             value.getSource().getValue(ValueType.INDEXED), this.getVisibility(value), date_type);
             
             counter += writeKey(biKey, value.getEdgeValue(false, date_type), context, contextWriter);
-            
+
             // sink STATS/ACTIVITY row
-            Key sinkActivityKey = createStatsKey(STATS_TYPE.ACTIVITY, value, value.getSink(), value.getSink().getValue(ValueType.INDEXED),
-                            this.getVisibility(value), date_type);
-            counter += writeKey(sinkActivityKey, value.getStatsActivityValue(false, date_type), context, contextWriter);
-            
-            // sink STATS/DURATION row
-            if (value.hasDuration()) {
-                Key sinkDurationKey = createStatsKey(STATS_TYPE.DURATION, value, value.getSink(), value.getSink().getValue(ValueType.INDEXED),
-                                this.getDurationVisibility(value), date_type);
-                counter += writeKey(sinkDurationKey, value.getDurationAsValue(false), context, contextWriter);
+            if (statsEdgeEnable) {
+                Key sinkActivityKey = createStatsKey(STATS_TYPE.ACTIVITY, value, value.getSink(), value.getSink().getValue(ValueType.INDEXED),
+                        this.getVisibility(value), date_type);
+                counter += writeKey(sinkActivityKey, value.getStatsActivityValue(false, date_type), context, contextWriter);
+
+                // sink STATS/DURATION row
+                if (value.hasDuration()) {
+                    Key sinkDurationKey = createStatsKey(STATS_TYPE.DURATION, value, value.getSink(), value.getSink().getValue(ValueType.INDEXED),
+                            this.getDurationVisibility(value), date_type);
+                    counter += writeKey(sinkDurationKey, value.getDurationAsValue(false), context, contextWriter);
+                }
             }
         }
         
@@ -993,8 +1002,8 @@ public class ProtobufEdgeDataTypeHandler<KEYIN,KEYOUT,VALUEOUT> implements Exten
             Key maskedKey = createEdgeKey(value, value.getSource(), value.getSource().getMaskedValue(ValueType.INDEXED), value.getSink(), value.getSink()
                             .getMaskedValue(ValueType.INDEXED), maskedVisibility, date_type);
             counter += writeKey(maskedKey, value.getEdgeValue(true, date_type), context, contextWriter);
-            
-            if (value.getSource().hasMaskedValue()) {
+
+            if (statsEdgeEnable && value.getSource().hasMaskedValue()) {
                 // source STATS/ACTIVITY row
                 Key maskedSourceActivityKey = createStatsKey(STATS_TYPE.ACTIVITY, value, value.getSource(),
                                 value.getSource().getMaskedValue(ValueType.INDEXED), maskedVisibility, date_type);
@@ -1015,8 +1024,8 @@ public class ProtobufEdgeDataTypeHandler<KEYIN,KEYOUT,VALUEOUT> implements Exten
                 Key maskedBiKey = createEdgeKey(value, value.getSink(), value.getSink().getMaskedValue(ValueType.INDEXED), value.getSource(), value.getSource()
                                 .getMaskedValue(ValueType.INDEXED), maskedVisibility, date_type);
                 counter += writeKey(maskedBiKey, value.getEdgeValue(false, date_type), context, contextWriter);
-                
-                if (value.getSink().hasMaskedValue()) {
+
+                if (statsEdgeEnable && value.getSink().hasMaskedValue()) {
                     // sink STATS/ACTIVITY row
                     Key maskedSinkActivityKey = createStatsKey(STATS_TYPE.ACTIVITY, value, value.getSink(), value.getSink().getMaskedValue(ValueType.INDEXED),
                                     maskedVisibility, date_type);
